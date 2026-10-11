@@ -2450,13 +2450,12 @@ Traders buy back at no more than 60% of their own selling price. Factions may of
 
 <!-- PORTRAIT SHEET SELECTION MODAL -->
 <div id="portraitSheetModal" class="modal">
-  <div class="modalBox" style="width:min(760px, 95%); max-height:85vh; display:flex; flex-direction:column;">
+  <div class="modalBox" style="width:min(720px, 95%); max-height:85vh; display:flex; flex-direction:column;">
     <div class="modalTitle">SELECT PORTRAIT FROM SHEET (assets/ui_actor_portrets.png)</div>
-    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;">Click any portrait below to select it:</div>
-    <div id="psGridContainer" style="flex:1; height:380px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:10px; align-content:start;">
+    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;" id="psMsg">Scanning sprite sheet for portraits automatically...</div>
+    <div id="psGridContainer" style="flex:1; height:380px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:10px; align-content:start;">
       <!-- Dynamically populated portrait thumbnails -->
     </div>
-    <div id="psMsg" style="min-height:16px; margin-top:6px; font-size:10px; color:var(--gold)"></div>
     <div class="modalButtons" style="margin-top:8px;">
       <button id="psCancelBtn" style="width:100%;">CANCEL</button>
     </div>
@@ -3124,7 +3123,7 @@ const f0=event.target.files&&event.target.files[0];
 if(f0){const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,300/Math.max(im.width,im.height));const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);const img=document.getElementById('portrait-img');img.src=cv.toDataURL('image/jpeg',0.82);img.style.display='block';document.getElementById('portrait-text').style.display='none';if(typeof persistDossier==='function')persistDossier(true)};im.src=rd.result};rd.readAsDataURL(f0);return}
 }
 
-/* ===== PORTRAIT SHEET SELECTOR LOGIC (HORIZONTAL RECTANGLE GRID) ===== */
+/* ===== PORTRAIT SHEET SELECTOR LOGIC (AUTOMATED BOUNDING BOX DETECTOR) ===== */
 let psImage = null;
 
 function openPortraitSheetModal() {
@@ -3134,76 +3133,125 @@ function openPortraitSheetModal() {
   const msg = $('psMsg');
   
   if (gridContainer.children.length === 0) {
-    msg.textContent = 'Loading and slicing assets/ui_actor_portrets.png...';
+    msg.textContent = 'Analyzing sprite sheet structure and extracting portraits...';
     psImage = new Image();
     psImage.onload = () => {
-      gridContainer.innerHTML = '';
+      const w = psImage.width;
+      const h = psImage.height;
       
-      // Horizontal rectangular cell dimensions (160 width x 120 height / 4:3 ratio)
-      const cellW = 160, cellH = 120;
-      const cols = Math.floor(psImage.width / cellW);
-      const rows = Math.floor(psImage.height / cellH);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(psImage, 0, 0);
       
-      let count = 0;
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const cv = document.createElement('canvas');
-          cv.width = cellW; 
-          cv.height = cellH;
-          const ctx = cv.getContext('2d');
-          ctx.drawImage(psImage, c * cellW, r * cellH, cellW, cellH, 0, 0, cellW, cellH);
-          
-          // Validate content to skip empty/black slots automatically
-          let hasContent = false;
-          try {
-            const imgData = ctx.getImageData(0, 0, cellW, cellH).data;
-            let nonBlackCount = 0;
-            for (let i = 0; i < imgData.length; i += 24) {
-              const red = imgData[i], green = imgData[i+1], blue = imgData[i+2], alpha = imgData[i+3];
-              if (alpha > 15 && (red > 15 || green > 15 || blue > 15)) {
-                nonBlackCount++;
-                if (nonBlackCount > 20) { hasContent = true; break; }
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const data = imgData.data;
+      
+      const isContent = (px, py) => {
+        const idx = (py * w + px) * 4;
+        return data[idx] > 15 || data[idx+1] > 15 || data[idx+2] > 15;
+      };
+      
+      const visited = new Uint8Array(w * h);
+      const boxes = [];
+      const step = 12; // Scanning step for efficiency
+      
+      // Connected component bounding box detection
+      for (let y = 0; y < h; y += step) {
+        for (let x = 0; x < w; x += step) {
+          const vIdx = y * w + x;
+          if (visited[vIdx]) continue;
+          if (isContent(x, y)) {
+            let minX = x, maxX = x, minY = y, maxY = y;
+            let head = 0;
+            const qX = new Int32Array(w * h);
+            const qY = new Int32Array(w * h);
+            qX[0] = x; qY[0] = y;
+            let tail = 1;
+            visited[vIdx] = 1;
+            
+            while (head < tail) {
+              const cx = qX[head];
+              const cy = qY[head];
+              head++;
+              
+              if (cx < minX) minX = cx;
+              if (cx > maxX) maxX = cx;
+              if (cy < minY) minY = cy;
+              if (cy > maxY) maxY = cy;
+              
+              const nStep = 8;
+              const neighbors = [
+                {nx: cx + nStep, ny: cy}, {nx: cx - nStep, ny: cy},
+                {nx: cx, ny: cy + nStep}, {nx: cx, ny: cy - nStep}
+              ];
+              
+              for (let n of neighbors) {
+                const nx = n.nx, ny = n.ny;
+                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+                  const nvIdx = ny * w + nx;
+                  if (!visited[nvIdx] && isContent(nx, ny)) {
+                    visited[nvIdx] = 1;
+                    if (tail < qX.length) {
+                      qX[tail] = nx; qY[tail] = ny;
+                      tail++;
+                    }
+                  }
+                }
               }
             }
-          } catch(err) {
-            hasContent = true;
+            
+            const boxW = maxX - minX;
+            const boxH = maxY - minY;
+            // Filter out tiny noise (like blood splatter) or full background artifacts
+            if (boxW > 35 && boxH > 35 && boxW < 400 && boxH < 400) {
+              boxes.push({x: minX, y: minY, w: boxW, h: boxH});
+            }
           }
-          
-          if (!hasContent) continue;
-
-          const thumb = document.createElement('div');
-          // Enforce 4:3 horizontal rectangle aspect ratio with zero overlap or distortion
-          thumb.style.cssText = 'border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:4/3; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px;';
-          
-          const dataUrl = cv.toDataURL('image/jpeg', 0.9);
-          const tImg = document.createElement('img');
-          tImg.src = dataUrl;
-          tImg.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#111518; display:block;';
-          thumb.appendChild(tImg);
-          
-          thumb.onmouseenter = () => thumb.style.borderColor = 'var(--gold)';
-          thumb.onmouseleave = () => thumb.style.borderColor = 'var(--border)';
-          thumb.onclick = () => {
-            const img = $('portrait-img');
-            img.src = dataUrl;
-            img.style.display = 'block';
-            $('portrait-text').style.display = 'none';
-            modal.classList.remove('visible');
-            persistDossier(true);
-          };
-           
-          gridContainer.appendChild(thumb);
-          count++;
         }
       }
-      msg.textContent = `Loaded ${count} horizontal rectangular portraits. Click one to apply.`;
+      
+      gridContainer.innerHTML = '';
+      boxes.forEach((b) => {
+        const cv = document.createElement('canvas');
+        cv.width = b.w;
+        cv.height = b.h;
+        const c = cv.getContext('2d');
+        c.drawImage(psImage, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+        
+        const thumb = document.createElement('div');
+        // Dynamic aspect ratio based on each portrait's individual dimensions
+        thumb.style.cssText = `border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:${b.w}/${b.h}; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px;`;
+        
+        const dataUrl = cv.toDataURL('image/jpeg', 0.9);
+        const tImg = document.createElement('img');
+        tImg.src = dataUrl;
+        tImg.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#111518; display:block;';
+        thumb.appendChild(tImg);
+        
+        thumb.onmouseenter = () => thumb.style.borderColor = 'var(--gold)';
+        thumb.onmouseleave = () => thumb.style.borderColor = 'var(--border)';
+        thumb.onclick = () => {
+          const img = $('portrait-img');
+          img.src = dataUrl;
+          img.style.display = 'block';
+          $('portrait-text').style.display = 'none';
+          modal.classList.remove('visible');
+          persistDossier(true);
+        };
+        
+        gridContainer.appendChild(thumb);
+      });
+      
+      msg.textContent = `Successfully auto-detected ${boxes.length} portraits. Click any to apply.`;
     };
     psImage.onerror = () => {
       msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.';
     };
     psImage.src = 'assets/ui_actor_portrets.png';
   } else {
-    msg.textContent = 'Select a portrait from the grid below.';
+    msg.textContent = `Ready. Showing auto-detected portraits.`;
   }
 }
 
