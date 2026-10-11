@@ -3150,18 +3150,26 @@ function openPortraitSheetModal() {
           const ctx = cv.getContext('2d');
           ctx.drawImage(psImage, c * cellW, r * cellH, cellW, cellH, 0, 0, cellW, cellH);
           
-          let hasContent = true;
+          // Accurate check to filter out empty, transparent, or pure black grid slots
+          let hasContent = false;
           try {
             const imgData = ctx.getImageData(0, 0, cellW, cellH).data;
-            hasContent = false;
-            for (let i = 3; i < imgData.length; i += 16) {
-              if (imgData[i] > 20) { hasContent = true; break; }
+            let nonBlackCount = 0;
+            for (let i = 0; i < imgData.length; i += 16) {
+              const red = imgData[i], green = imgData[i+1], blue = imgData[i+2], alpha = imgData[i+3];
+              if (alpha > 15 && (red > 12 || green > 12 || blue > 12)) {
+                nonBlackCount++;
+                if (nonBlackCount > 20) { // Requires enough non-black pixels to be a real portrait
+                  hasContent = true;
+                  break;
+                }
+              }
             }
           } catch(err) {
-            hasContent = true;
+            hasContent = true; // Fallback if environment restricts pixel reading
           }
           
-          if (!hasContent && (cols * rows > 10)) continue;
+          if (!hasContent) continue; // Completely skips empty/black slots
 
           const thumb = document.createElement('div');
           thumb.style.cssText = 'border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; position:relative; aspect-ratio:1; overflow:hidden; display:flex; align-items:center; justify-content:center;';
