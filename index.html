@@ -2450,10 +2450,10 @@ Traders buy back at no more than 60% of their own selling price. Factions may of
 
 <!-- PORTRAIT SHEET SELECTION MODAL -->
 <div id="portraitSheetModal" class="modal">
-  <div class="modalBox" style="width:min(720px, 95%); max-height:85vh; display:flex; flex-direction:column;">
+  <div class="modalBox" style="width:min(740px, 95%); max-height:85vh; display:flex; flex-direction:column;">
     <div class="modalTitle">SELECT PORTRAIT FROM SHEET (assets/ui_actor_portrets.png)</div>
     <div style="font-size:10px; color:var(--muted); margin-bottom:8px;">Click any portrait below to select it:</div>
-    <div id="psGridContainer" style="flex:1; height:380px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(90px, 1fr)); gap:12px; align-content:start;">
+    <div id="psGridContainer" style="flex:1; height:380px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:10px; align-content:start;">
       <!-- Dynamically populated portrait thumbnails -->
     </div>
     <div id="psMsg" style="min-height:16px; margin-top:6px; font-size:10px; color:var(--gold)"></div>
@@ -3124,7 +3124,7 @@ const f0=event.target.files&&event.target.files[0];
 if(f0){const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,300/Math.max(im.width,im.height));const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);const img=document.getElementById('portrait-img');img.src=cv.toDataURL('image/jpeg',0.82);img.style.display='block';document.getElementById('portrait-text').style.display='none';if(typeof persistDossier==='function')persistDossier(true)};im.src=rd.result};rd.readAsDataURL(f0);return}
 }
 
-/* ===== PORTRAIT SHEET SELECTOR LOGIC (AUTOMATIC RECTANGULAR GRID) ===== */
+/* ===== PORTRAIT SHEET SELECTOR LOGIC (AUTOMATIC HORIZONTAL RECTANGLE GRID) ===== */
 let psImage = null;
 
 function openPortraitSheetModal() {
@@ -3139,8 +3139,8 @@ function openPortraitSheetModal() {
     psImage.onload = () => {
       gridContainer.innerHTML = '';
       
-      // Standard Stalker rectangular portrait cell dimensions (128 width x 160 height)
-      const cellW = 128, cellH = 160;
+      // Horizontal rectangle cell dimensions (e.g. 160 width x 120 height / 4:3 ratio)
+      const cellW = 160, cellH = 120;
       const cols = Math.floor(psImage.width / cellW);
       const rows = Math.floor(psImage.height / cellH);
       
@@ -3172,8 +3172,8 @@ function openPortraitSheetModal() {
           if (!hasContent) continue;
 
           const thumb = document.createElement('div');
-          // aspect-ratio matches 128x160 (4:5) perfectly to prevent any squishing or overlapping
-          thumb.style.cssText = 'border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:4/5; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px;';
+          // aspect-ratio 4/3 matches horizontal rectangles perfectly with no overlap or squishing
+          thumb.style.cssText = 'border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:4/3; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px;';
           
           const dataUrl = cv.toDataURL('image/jpeg', 0.9);
           const tImg = document.createElement('img');
@@ -3196,7 +3196,7 @@ function openPortraitSheetModal() {
           count++;
         }
       }
-      msg.textContent = `Loaded ${count} rectangular portraits automatically. Click one to apply.`;
+      msg.textContent = `Loaded ${count} horizontal portraits automatically. Click one to apply.`;
     };
     psImage.onerror = () => {
       msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.';
