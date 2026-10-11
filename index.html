@@ -2452,8 +2452,8 @@ Traders buy back at no more than 60% of their own selling price. Factions may of
 <div id="portraitSheetModal" class="modal">
   <div class="modalBox" style="width:min(720px, 95%); max-height:85vh; display:flex; flex-direction:column;">
     <div class="modalTitle">SELECT PORTRAIT FROM SHEET (assets/ui_actor_portrets.png)</div>
-    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;" id="psMsg">Scanning sprite sheet for portraits automatically...</div>
-    <div id="psGridContainer" style="flex:1; height:380px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:10px; align-content:start;">
+    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;" id="psMsg">Analyzing sprite sheet layout automatically...</div>
+    <div id="psGridContainer" style="flex:1; height:380px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(100px, 1fr)); gap:10px; align-content:start;">
       <!-- Dynamically populated portrait thumbnails -->
     </div>
     <div class="modalButtons" style="margin-top:8px;">
@@ -3123,7 +3123,7 @@ const f0=event.target.files&&event.target.files[0];
 if(f0){const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,300/Math.max(im.width,im.height));const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);const img=document.getElementById('portrait-img');img.src=cv.toDataURL('image/jpeg',0.82);img.style.display='block';document.getElementById('portrait-text').style.display='none';if(typeof persistDossier==='function')persistDossier(true)};im.src=rd.result};rd.readAsDataURL(f0);return}
 }
 
-/* ===== PORTRAIT SHEET SELECTOR LOGIC (AUTOMATED BOUNDING BOX DETECTOR) ===== */
+/* ===== PORTRAIT SHEET SELECTOR LOGIC (AUTOMATED PROJECTION PROFILE SLICER) ===== */
 let psImage = null;
 
 function openPortraitSheetModal() {
@@ -3133,7 +3133,7 @@ function openPortraitSheetModal() {
   const msg = $('psMsg');
   
   if (gridContainer.children.length === 0) {
-    msg.textContent = 'Analyzing sprite sheet structure and extracting portraits...';
+    msg.textContent = 'Auto-detecting portrait grid boundaries...';
     psImage = new Image();
     psImage.onload = () => {
       const w = psImage.width;
@@ -3148,69 +3148,82 @@ function openPortraitSheetModal() {
       const imgData = ctx.getImageData(0, 0, w, h);
       const data = imgData.data;
       
-      const isContent = (px, py) => {
-        const idx = (py * w + px) * 4;
-        return data[idx] > 15 || data[idx+1] > 15 || data[idx+2] > 15;
-      };
+      // 1. Calculate row and column histograms for gaps
+      const rowCounts = new Int32Array(h);
+      const colCounts = new Int32Array(w);
       
-      const visited = new Uint8Array(w * h);
-      const boxes = [];
-      const step = 12; // Scanning step for efficiency
-      
-      // Connected component bounding box detection
-      for (let y = 0; y < h; y += step) {
-        for (let x = 0; x < w; x += step) {
-          const vIdx = y * w + x;
-          if (visited[vIdx]) continue;
-          if (isContent(x, y)) {
-            let minX = x, maxX = x, minY = y, maxY = y;
-            let head = 0;
-            const qX = new Int32Array(w * h);
-            const qY = new Int32Array(w * h);
-            qX[0] = x; qY[0] = y;
-            let tail = 1;
-            visited[vIdx] = 1;
-            
-            while (head < tail) {
-              const cx = qX[head];
-              const cy = qY[head];
-              head++;
-              
-              if (cx < minX) minX = cx;
-              if (cx > maxX) maxX = cx;
-              if (cy < minY) minY = cy;
-              if (cy > maxY) maxY = cy;
-              
-              const nStep = 8;
-              const neighbors = [
-                {nx: cx + nStep, ny: cy}, {nx: cx - nStep, ny: cy},
-                {nx: cx, ny: cy + nStep}, {nx: cx, ny: cy - nStep}
-              ];
-              
-              for (let n of neighbors) {
-                const nx = n.nx, ny = n.ny;
-                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-                  const nvIdx = ny * w + nx;
-                  if (!visited[nvIdx] && isContent(nx, ny)) {
-                    visited[nvIdx] = 1;
-                    if (tail < qX.length) {
-                      qX[tail] = nx; qY[tail] = ny;
-                      tail++;
-                    }
-                  }
-                }
-              }
-            }
-            
-            const boxW = maxX - minX;
-            const boxH = maxY - minY;
-            // Filter out tiny noise (like blood splatter) or full background artifacts
-            if (boxW > 35 && boxH > 35 && boxW < 400 && boxH < 400) {
-              boxes.push({x: minX, y: minY, w: boxW, h: boxH});
-            }
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = (y * w + x) * 4;
+          if (data[idx] > 15 || data[idx+1] > 15 || data[idx+2] > 15) {
+            rowCounts[y]++;
+            colCounts[x]++;
           }
         }
       }
+      
+      // 2. Helper to extract distinct intervals with auto-subdivision for merged blocks
+      const findIntervals = (counts, threshold, minLen, maxLen) => {
+        const intervals = [];
+        let start = -1;
+        for (let i = 0; i < counts.length; i++) {
+          if (counts[i] > threshold) {
+            if (start === -1) start = i;
+          } else {
+            if (start !== -1) {
+              const len = i - start;
+              if (len >= minLen && len <= maxLen) {
+                intervals.push({start, end: i});
+              } else if (len > maxLen) {
+                const parts = Math.round(len / 128) || 1;
+                const chunk = len / parts;
+                for (let p = 0; p < parts; p++) {
+                  intervals.push({
+                    start: Math.round(start + p * chunk),
+                    end: Math.round(start + (p + 1) * chunk)
+                  });
+                }
+              }
+              start = -1;
+            }
+          }
+        }
+        if (start !== -1) {
+          const len = counts.length - start;
+          if (len >= minLen && len <= maxLen) {
+            intervals.push({start, end: counts.length});
+          }
+        }
+        return intervals;
+      };
+      
+      const rowIntervals = findIntervals(rowCounts, 4, 30, 450);
+      const colIntervals = findIntervals(colCounts, 4, 30, 450);
+      
+      const boxes = [];
+      rowIntervals.forEach(ri => {
+        colIntervals.forEach(ci => {
+          const bw = ci.end - ci.start;
+          const bh = ri.end - ri.start;
+          
+          // Confirm tile contains actual content
+          let hasContent = false;
+          for (let y = ri.start + 5; y < ri.end - 5; y += Math.max(4, Math.floor(bh/6))) {
+            for (let x = ci.start + 5; x < ci.end - 5; x += Math.max(4, Math.floor(bw/6))) {
+              const idx = (y * w + x) * 4;
+              if (data[idx] > 20 || data[idx+1] > 20 || data[idx+2] > 20) {
+                hasContent = true;
+                break;
+              }
+            }
+            if (hasContent) break;
+          }
+          
+          if (hasContent) {
+            boxes.push({x: ci.start, y: ri.start, w: bw, h: bh});
+          }
+        });
+      });
       
       gridContainer.innerHTML = '';
       boxes.forEach((b) => {
@@ -3221,7 +3234,6 @@ function openPortraitSheetModal() {
         c.drawImage(psImage, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
         
         const thumb = document.createElement('div');
-        // Dynamic aspect ratio based on each portrait's individual dimensions
         thumb.style.cssText = `border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:${b.w}/${b.h}; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px;`;
         
         const dataUrl = cv.toDataURL('image/jpeg', 0.9);
@@ -3244,14 +3256,14 @@ function openPortraitSheetModal() {
         gridContainer.appendChild(thumb);
       });
       
-      msg.textContent = `Successfully auto-detected ${boxes.length} portraits. Click any to apply.`;
+      msg.textContent = `Successfully extracted ${boxes.length} portraits automatically. Click any to apply.`;
     };
     psImage.onerror = () => {
       msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.';
     };
     psImage.src = 'assets/ui_actor_portrets.png';
   } else {
-    msg.textContent = `Ready. Showing auto-detected portraits.`;
+    msg.textContent = `Ready. Showing auto-extracted portraits.`;
   }
 }
 
