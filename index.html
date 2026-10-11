@@ -2450,10 +2450,10 @@ Traders buy back at no more than 60% of their own selling price. Factions may of
 
 <!-- PORTRAIT SHEET SELECTION MODAL -->
 <div id="portraitSheetModal" class="modal">
-  <div class="modalBox" style="width:min(740px, 95%); max-height:85vh; display:flex; flex-direction:column;">
+  <div class="modalBox" style="width:min(800px, 95%); max-height:85vh; display:flex; flex-direction:column;">
     <div class="modalTitle">SELECT PORTRAIT FROM SHEET (assets/ui_actor_portrets.png)</div>
-    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;" id="psMsg">Detecting variable-sized portrait boundaries...</div>
-    <div id="psGridContainer" style="flex:1; height:380px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:10px; align-content:start;">
+    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;" id="psMsg">Loading portraits...</div>
+    <div id="psGridContainer" style="flex:1; height:420px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:10px; align-content:start;">
       <!-- Dynamically populated portrait thumbnails -->
     </div>
     <div class="modalButtons" style="margin-top:8px;">
@@ -3123,10 +3123,9 @@ const f0=event.target.files&&event.target.files[0];
 if(f0){const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,300/Math.max(im.width,im.height));const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);const img=document.getElementById('portrait-img');img.src=cv.toDataURL('image/jpeg',0.82);img.style.display='block';document.getElementById('portrait-text').style.display='none';if(typeof persistDossier==='function')persistDossier(true)};im.src=rd.result};rd.readAsDataURL(f0);return}
 }
 
-/* ===== PORTRAIT SHEET SELECTOR LOGIC (SELF-CONTAINED XML MANIFEST PARSER) ===== */
+/* ===== PORTRAIT SHEET SELECTOR LOGIC (XML MANIFEST + LABELED PREVIEWS) ===== */
 let psImage = null;
 
-// Embedded XML manifest to prevent local file:// fetch / CORS blocks
 const UI_PORTRETS_XML = `<w>
     <file name="ui\\ui_actor_portrets">
 	<!-- DAOO -->
@@ -3559,7 +3558,7 @@ function openPortraitSheetModal() {
   const msg = $('psMsg');
   
   if (gridContainer.children.length === 0) {
-    msg.textContent = 'Parsing embedded XML manifest (1:1 native coordinates)...';
+    msg.textContent = 'Parsing embedded XML manifest...';
     
     try {
       const parser = new DOMParser();
@@ -3593,19 +3592,36 @@ function openPortraitSheetModal() {
         });
         
         allPortraits.forEach(b => {
+          // Clean up the name for display (e.g. "ui_inGame2_Strelok" -> "Strelok")
+          const displayName = b.id.replace(/^ui_inGame2_/i, '').replace(/_/g, ' ');
+          
           const thumb = document.createElement('div');
-          thumb.style.cssText = `border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:${b.w}/${b.h}; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px; position:relative;`;
+          thumb.style.cssText = `border:1px solid var(--border); background:#050708; cursor:pointer; display:flex; flex-direction:column; overflow:hidden; border-radius:4px; transition:0.15s;`;
+          
+          const imgContainer = document.createElement('div');
+          imgContainer.style.cssText = `width:100%; aspect-ratio:${b.w}/${b.h}; background:#111518; display:flex; align-items:center; justify-content:center; overflow:hidden;`;
           
           const dataUrl = b.cv.toDataURL('image/jpeg', 0.92);
           const tImg = document.createElement('img');
           tImg.src = dataUrl;
-          tImg.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#111518; display:block;';
-          thumb.appendChild(tImg);
+          tImg.style.cssText = 'width:100%; height:100%; object-fit:contain; display:block;';
+          imgContainer.appendChild(tImg);
           
-          thumb.title = `${b.id} (${b.w}x${b.h})`;
+          const label = document.createElement('div');
+          label.textContent = displayName;
+          label.style.cssText = 'font-size:9px; color:var(--muted); padding:4px 6px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:#080b0c; border-top:1px solid var(--border);';
           
-          thumb.onmouseenter = () => thumb.style.borderColor = 'var(--gold)';
-          thumb.onmouseleave = () => thumb.style.borderColor = 'var(--border)';
+          thumb.appendChild(imgContainer);
+          thumb.appendChild(label);
+          
+          thumb.onmouseenter = () => {
+            thumb.style.borderColor = 'var(--gold)';
+            label.style.color = 'var(--text)';
+          };
+          thumb.onmouseleave = () => {
+            thumb.style.borderColor = 'var(--border)';
+            label.style.color = 'var(--muted)';
+          };
           thumb.onclick = () => {
             const img = $('portrait-img');
             img.src = dataUrl;
@@ -3618,7 +3634,7 @@ function openPortraitSheetModal() {
           gridContainer.appendChild(thumb);
         });
         
-        msg.textContent = `Successfully loaded ${allPortraits.length} portraits using exact 1:1 XML mapping. Click any to apply.`;
+        msg.textContent = `Successfully loaded ${allPortraits.length} portraits with clean card previews. Click any to apply.`;
       };
       
       psImage.onerror = () => {
