@@ -3559,6 +3559,8 @@ function openPortraitSheetModal() {
   const gridContainer = $('psGridContainer');
   const msg = $('psMsg');
   
+  let allPortraits = [];
+
   if (gridContainer.children.length === 0) {
     msg.textContent = 'Parsing embedded XML manifest...';
     
@@ -3572,7 +3574,6 @@ function openPortraitSheetModal() {
         gridContainer.innerHTML = '';
         const imgW = psImage.width;
         const imgH = psImage.height;
-        const allPortraits = [];
         
         textureNodes.forEach(node => {
           const id = node.getAttribute('id');
