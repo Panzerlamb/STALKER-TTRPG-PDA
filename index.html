@@ -2452,7 +2452,7 @@ Traders buy back at no more than 60% of their own selling price. Factions may of
 <div id="portraitSheetModal" class="modal">
   <div class="modalBox" style="width:min(740px, 95%); max-height:85vh; display:flex; flex-direction:column;">
     <div class="modalTitle">SELECT PORTRAIT FROM SHEET (assets/ui_actor_portrets.png)</div>
-    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;" id="psMsg">Analyzing composite sprite sheet blocks automatically...</div>
+    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;" id="psMsg">Auto-detecting multi-block grid pitches...</div>
     <div id="psGridContainer" style="flex:1; height:380px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:10px; align-content:start;">
       <!-- Dynamically populated portrait thumbnails -->
     </div>
@@ -3123,7 +3123,7 @@ const f0=event.target.files&&event.target.files[0];
 if(f0){const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,300/Math.max(im.width,im.height));const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);const img=document.getElementById('portrait-img');img.src=cv.toDataURL('image/jpeg',0.82);img.style.display='block';document.getElementById('portrait-text').style.display='none';if(typeof persistDossier==='function')persistDossier(true)};im.src=rd.result};rd.readAsDataURL(f0);return}
 }
 
-/* ===== PORTRAIT SHEET SELECTOR LOGIC (COMPOSITE ISLAND & SUB-GRID SCANNER) ===== */
+/* ===== PORTRAIT SHEET SELECTOR LOGIC (ADAPTIVE PER-BLOCK PITCH DETECTOR) ===== */
 let psImage = null;
 
 function openPortraitSheetModal() {
@@ -3133,7 +3133,7 @@ function openPortraitSheetModal() {
   const msg = $('psMsg');
   
   if (gridContainer.children.length === 0) {
-    msg.textContent = 'Scanning composite portrait sections...';
+    msg.textContent = 'Analyzing multi-block atlas layout in assets/ui_actor_portrets.png...[cite: 1]';
     psImage = new Image();
     psImage.onload = () => {
       const w = psImage.width;
@@ -3153,13 +3153,13 @@ function openPortraitSheetModal() {
         return data[idx] > 15 || data[idx+1] > 15 || data[idx+2] > 15;
       };
       
-      // Step 1: Detect major independent content blocks (islands) separated by black space
+      // Step 1: Isolate major independent blocks (islands) separated by black space
       const visited = new Uint8Array(w * h);
       const islands = [];
-      const step = 10;
+      const scanStep = 12;
       
-      for (let y = 0; y < h; y += step) {
-        for (let x = 0; x < w; x += step) {
+      for (let y = 0; y < h; y += scanStep) {
+        for (let x = 0; x < w; x += scanStep) {
           const vIdx = y * w + x;
           if (visited[vIdx] || !isContent(x, y)) continue;
           
@@ -3177,7 +3177,7 @@ function openPortraitSheetModal() {
             if (cy < minY) minY = cy;
             if (cy > maxY) maxY = cy;
             
-            const neighbors = [{x:cx+10, y:cy}, {x:cx-10, y:cy}, {x:cx, y:cy+10}, {x:cx, y:cy-10}];
+            const neighbors = [{x:cx+12, y:cy}, {x:cx-12, y:cy}, {x:cx, y:cy+12}, {x:cx, y:cy-12}];
             for(let n of neighbors) {
               if (n.x >= 0 && n.x < w && n.y >= 0 && n.y < h) {
                 const nv = n.y * w + n.x;
@@ -3190,46 +3190,86 @@ function openPortraitSheetModal() {
             }
           }
           
-          const iw = maxX - minX, ih = maxY - minY;
-          if (iw > 40 && ih > 40) {
+          const iw = (maxX - minX) + scanStep;
+          const ih = (maxY - minY) + scanStep;
+          if (iw > 30 && ih > 30) {
             islands.push({x: minX, y: minY, w: iw, h: ih});
           }
         }
       }
       
-      // Step 2: Dynamically parse each island block into individual portrait cells
+      // Step 2: For each island, auto-detect its local cell pitch (width & height)
       const allPortraits = [];
       
       islands.forEach(island => {
-        // Estimate grid density based on block dimensions (standard Stalker cells are ~128px)
-        const cols = Math.max(1, Math.round(island.w / 128));
-        const rows = Math.max(1, Math.round(island.h / 128));
-        const cellW = island.w / cols;
-        const cellH = island.h / rows;
+        // Extract local profile sums within this island to find repeating cell pitch
+        const localCols = new Int32Array(island.w);
+        const localRows = new Int32Array(island.h);
+        
+        for (let py = 0; py < island.h; py++) {
+          for (let px = 0; px < island.w; px++) {
+            const imgX = island.x + px;
+            const imgY = island.y + py;
+            if (imgX < w && imgY < h) {
+              const idx = (imgY * w + imgX) * 4;
+              if (data[idx] > 15 || data[idx+1] > 15 || data[idx+2] > 15) {
+                localCols[px]++;
+                localRows[py]++;
+              }
+            }
+          }
+        }
+        
+        // Helper to estimate repeating cell size from density variance/peaks
+        const estimatePitch = (sumArr, totalLen, defaultSize) => {
+          let peaks = 0;
+          let inPeak = false;
+          for (let i = 0; i < totalLen; i++) {
+            if (sumArr[i] > 5) {
+              if (!inPeak) { peaks++; inPeak = true; }
+            } else {
+              inPeak = false;
+            }
+          }
+          if (peaks <= 1) return defaultSize;
+          const estimated = Math.round(totalLen / peaks);
+          return Math.max(40, Math.min(200, estimated));
+        };
+        
+        // Fallback default dimensions if pitch estimation is ambiguous
+        const cellW = estimatePitch(localCols, island.w, 128);
+        const cellH = estimatePitch(localRows, island.h, 128);
+        
+        const cols = Math.max(1, Math.round(island.w / cellW));
+        const rows = Math.max(1, Math.round(island.h / cellH));
+        
+        const exactW = island.w / cols;
+        const exactH = island.h / rows;
         
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
-            const px = Math.round(island.x + c * cellW);
-            const py = Math.round(island.y + r * cellH);
-            const pw = Math.round(cellW);
-            const ph = Math.round(cellH);
+            const px = Math.round(island.x + (c * exactW));
+            const py = Math.round(island.y + (r * exactH));
+            const pw = Math.round(exactW);
+            const ph = Math.round(exactH);
             
-            if (pw < 20 || ph < 20) continue;
+            if (pw < 25 || ph < 25 || px + pw > w || py + ph > h) continue;
             
             const cv = document.createElement('canvas');
-            cv.width = pw; cv.height = ph;
+            cv.width = pw; 
+            cv.height = ph;
             const cCtx = cv.getContext('2d');
             cCtx.drawImage(psImage, px, py, pw, ph, 0, 0, pw, ph);
             
-            // Validate content to skip empty padding slots
+            // Content validation to filter out blank placeholder slots
             let hasContent = false;
             try {
               const subData = cCtx.getImageData(0, 0, pw, ph).data;
-              let count = 0;
-              for (let i = 0; i < subData.length; i += 24) {
+              let nonBlackCount = 0;
+              for (let i = 0; i < subData.length; i += 16) {
                 if (subData[i] > 15 || subData[i+1] > 15 || subData[i+2] > 15) {
-                  count++;
-                  if (count > 25) { hasContent = true; break; }
+                  nonBlackCount++;
+                  if (nonBlackCount > 25) { hasContent = true; break; }
                 }
               }
             } catch(err) {
@@ -3248,7 +3288,7 @@ function openPortraitSheetModal() {
         const thumb = document.createElement('div');
         thumb.style.cssText = `border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:${b.w}/${b.h}; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px;`;
         
-        const dataUrl = b.cv.toDataURL('image/jpeg', 0.9);
+        const dataUrl = b.cv.toDataURL('image/jpeg', 0.92);
         const tImg = document.createElement('img');
         tImg.src = dataUrl;
         tImg.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#111518; display:block;';
@@ -3268,14 +3308,14 @@ function openPortraitSheetModal() {
         gridContainer.appendChild(thumb);
       });
       
-      msg.textContent = `Successfully extracted ${allPortraits.length} portraits across all composite blocks. Click one to apply.`;
+      msg.textContent = `Successfully adapted and extracted ${allPortraits.length} portraits across composite blocks. Click one to apply.`;
     };
     psImage.onerror = () => {
-      msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.';
+      msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.[cite: 1]';
     };
     psImage.src = 'assets/ui_actor_portrets.png';
   } else {
-    msg.textContent = `Ready. Showing auto-extracted portraits.`;
+    msg.textContent = `Ready. Showing adaptive portraits.`;
   }
 }
 
