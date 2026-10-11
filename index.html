@@ -2452,7 +2452,7 @@ Traders buy back at no more than 60% of their own selling price. Factions may of
 <div id="portraitSheetModal" class="modal">
   <div class="modalBox" style="width:min(740px, 95%); max-height:85vh; display:flex; flex-direction:column;">
     <div class="modalTitle">SELECT PORTRAIT FROM SHEET (assets/ui_actor_portrets.png)</div>
-    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;" id="psMsg">Auto-detecting multi-block grid pitches...</div>
+    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;" id="psMsg">Detecting variable-sized portrait boundaries...</div>
     <div id="psGridContainer" style="flex:1; height:380px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:10px; align-content:start;">
       <!-- Dynamically populated portrait thumbnails -->
     </div>
@@ -3123,7 +3123,7 @@ const f0=event.target.files&&event.target.files[0];
 if(f0){const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,300/Math.max(im.width,im.height));const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);const img=document.getElementById('portrait-img');img.src=cv.toDataURL('image/jpeg',0.82);img.style.display='block';document.getElementById('portrait-text').style.display='none';if(typeof persistDossier==='function')persistDossier(true)};im.src=rd.result};rd.readAsDataURL(f0);return}
 }
 
-/* ===== PORTRAIT SHEET SELECTOR LOGIC (ADAPTIVE PER-BLOCK PITCH DETECTOR) ===== */
+/* ===== PORTRAIT SHEET SELECTOR LOGIC (GRADIENT EDGE & CONTOUR SEGMENTATION) ===== */
 let psImage = null;
 
 function openPortraitSheetModal() {
@@ -3133,7 +3133,7 @@ function openPortraitSheetModal() {
   const msg = $('psMsg');
   
   if (gridContainer.children.length === 0) {
-    msg.textContent = 'Analyzing multi-block atlas layout in assets/ui_actor_portrets.png...[cite: 1]';
+    msg.textContent = 'Analyzing variable-sized portrait edges...';
     psImage = new Image();
     psImage.onload = () => {
       const w = psImage.width;
@@ -3148,147 +3148,116 @@ function openPortraitSheetModal() {
       const imgData = ctx.getImageData(0, 0, w, h);
       const data = imgData.data;
       
-      const isContent = (x, y) => {
-        const idx = (y * w + x) * 4;
-        return data[idx] > 15 || data[idx+1] > 15 || data[idx+2] > 15;
-      };
+      // 1. Convert to grayscale for edge analysis
+      const gray = new Float32Array(w * h);
+      for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+        gray[p] = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+      }
       
-      // Step 1: Isolate major independent blocks (islands) separated by black space
+      // 2. Sobel Edge Detection to find sharp boundaries between touching portraits
+      const edges = new Uint8Array(w * h);
+      const edgeThreshold = 35; // Sensitivity for internal portrait borders
+      
+      for (let y = 1; y < h - 1; y += 2) {
+        for (let x = 1; x < w - 1; x += 2) {
+          const idx = y * w + x;
+          // Sobel kernels
+          const gx = -gray[idx - w - 1] + gray[idx - w + 1]
+                     -2 * gray[idx - 1] + 2 * gray[idx + 1]
+                     -gray[idx + w - 1] + gray[idx + w + 1];
+                     
+          const gy = -gray[idx - w - 1] - 2 * gray[idx - w] - gray[idx - w + 1]
+                     +gray[idx + w - 1] + 2 * gray[idx + w] + gray[idx + w + 1];
+                     
+          const mag = Math.sqrt(gx * gx + gy * gy);
+          if (mag > edgeThreshold) {
+            edges[idx] = 1;
+          }
+        }
+      }
+      
+      // 3. Flood-fill blob detection on non-edge areas to isolate variable-sized portraits
       const visited = new Uint8Array(w * h);
-      const islands = [];
-      const scanStep = 12;
+      const portraits = [];
+      const scanStep = 6;
       
-      for (let y = 0; y < h; y += scanStep) {
-        for (let x = 0; x < w; x += scanStep) {
-          const vIdx = y * w + x;
-          if (visited[vIdx] || !isContent(x, y)) continue;
+      for (let y = 10; y < h - 10; y += scanStep) {
+        for (let x = 10; x < w - 10; x += scanStep) {
+          const startIdx = y * w + x;
+          if (visited[startIdx] || edges[startIdx]) continue;
+          
+          // Check if it's actual content (not pure black background)
+          const pDataIdx = startIdx * 4;
+          if (data[pDataIdx] < 12 && data[pDataIdx+1] < 12 && data[pDataIdx+2] < 12) {
+            visited[startIdx] = 1;
+            continue;
+          }
           
           let minX = x, maxX = x, minY = y, maxY = y;
           const qX = [x], qY = [y];
-          visited[vIdx] = 1;
+          visited[startIdx] = 1;
           let head = 0;
+          let pixelCount = 0;
           
-          while(head < qX.length) {
+          while (head < qX.length && head < 15000) { // Safety cap for blob size
             const cx = qX[head], cy = qY[head];
             head++;
+            pixelCount++;
             
             if (cx < minX) minX = cx;
             if (cx > maxX) maxX = cx;
             if (cy < minY) minY = cy;
             if (cy > maxY) maxY = cy;
             
-            const neighbors = [{x:cx+12, y:cy}, {x:cx-12, y:cy}, {x:cx, y:cy+12}, {x:cx, y:cy-12}];
-            for(let n of neighbors) {
-              if (n.x >= 0 && n.x < w && n.y >= 0 && n.y < h) {
-                const nv = n.y * w + n.x;
-                if (!visited[nv] && isContent(n.x, n.y)) {
-                  visited[nv] = 1;
-                  qX.push(n.x);
-                  qY.push(n.y);
+            const neighbors = [
+              {nx: cx + scanStep, ny: cy}, {nx: cx - scanStep, ny: cy},
+              {nx: cx, ny: cy + scanStep}, {nx: cx, ny: cy - scanStep}
+            ];
+            
+            for (let n of neighbors) {
+              const nx = n.nx, ny = n.ny;
+              if (nx > 0 && nx < w - 1 && ny > 0 && ny < h - 1) {
+                const nIdx = ny * w + nx;
+                if (!visited[nIdx] && !edges[nIdx]) {
+                  visited[nIdx] = 1;
+                  qX.push(nx);
+                  qY.push(ny);
                 }
               }
             }
           }
           
-          const iw = (maxX - minX) + scanStep;
-          const ih = (maxY - minY) + scanStep;
-          if (iw > 30 && ih > 30) {
-            islands.push({x: minX, y: minY, w: iw, h: ih});
+          const bw = (maxX - minX) + scanStep;
+          const bh = (maxY - minY) + scanStep;
+          
+          // Filter out noise or oversized background regions, keeping valid variable-sized boxes
+          if (bw >= 35 && bh >= 35 && bw <= 350 && bh <= 350 && pixelCount > 150) {
+            portraits.push({x: minX - 2, y: minY - 2, w: bw + 4, h: bh + 4});
           }
         }
       }
       
-      // Step 2: For each island, auto-detect its local cell pitch (width & height)
-      const allPortraits = [];
-      
-      islands.forEach(island => {
-        // Extract local profile sums within this island to find repeating cell pitch
-        const localCols = new Int32Array(island.w);
-        const localRows = new Int32Array(island.h);
-        
-        for (let py = 0; py < island.h; py++) {
-          for (let px = 0; px < island.w; px++) {
-            const imgX = island.x + px;
-            const imgY = island.y + py;
-            if (imgX < w && imgY < h) {
-              const idx = (imgY * w + imgX) * 4;
-              if (data[idx] > 15 || data[idx+1] > 15 || data[idx+2] > 15) {
-                localCols[px]++;
-                localRows[py]++;
-              }
-            }
-          }
-        }
-        
-        // Helper to estimate repeating cell size from density variance/peaks
-        const estimatePitch = (sumArr, totalLen, defaultSize) => {
-          let peaks = 0;
-          let inPeak = false;
-          for (let i = 0; i < totalLen; i++) {
-            if (sumArr[i] > 5) {
-              if (!inPeak) { peaks++; inPeak = true; }
-            } else {
-              inPeak = false;
-            }
-          }
-          if (peaks <= 1) return defaultSize;
-          const estimated = Math.round(totalLen / peaks);
-          return Math.max(40, Math.min(200, estimated));
-        };
-        
-        // Fallback default dimensions if pitch estimation is ambiguous
-        const cellW = estimatePitch(localCols, island.w, 128);
-        const cellH = estimatePitch(localRows, island.h, 128);
-        
-        const cols = Math.max(1, Math.round(island.w / cellW));
-        const rows = Math.max(1, Math.round(island.h / cellH));
-        
-        const exactW = island.w / cols;
-        const exactH = island.h / rows;
-        
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            const px = Math.round(island.x + (c * exactW));
-            const py = Math.round(island.y + (r * exactH));
-            const pw = Math.round(exactW);
-            const ph = Math.round(exactH);
-            
-            if (pw < 25 || ph < 25 || px + pw > w || py + ph > h) continue;
-            
-            const cv = document.createElement('canvas');
-            cv.width = pw; 
-            cv.height = ph;
-            const cCtx = cv.getContext('2d');
-            cCtx.drawImage(psImage, px, py, pw, ph, 0, 0, pw, ph);
-            
-            // Content validation to filter out blank placeholder slots
-            let hasContent = false;
-            try {
-              const subData = cCtx.getImageData(0, 0, pw, ph).data;
-              let nonBlackCount = 0;
-              for (let i = 0; i < subData.length; i += 16) {
-                if (subData[i] > 15 || subData[i+1] > 15 || subData[i+2] > 15) {
-                  nonBlackCount++;
-                  if (nonBlackCount > 25) { hasContent = true; break; }
-                }
-              }
-            } catch(err) {
-              hasContent = true;
-            }
-            
-            if (hasContent) {
-              allPortraits.push({w: pw, h: ph, cv});
-            }
-          }
-        }
-      });
-      
       gridContainer.innerHTML = '';
-      allPortraits.forEach(b => {
-        const thumb = document.createElement('div');
-        thumb.style.cssText = `border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:${b.w}/${b.h}; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px;`;
+      portraits.forEach(b => {
+        // Ensure bounds are safe
+        const bx = Math.max(0, b.x);
+        const by = Math.max(0, b.y);
+        const bw = Math.min(w - bx, b.w);
+        const bh = Math.min(h - by, b.h);
         
-        const dataUrl = b.cv.toDataURL('image/jpeg', 0.92);
+        if (bw < 20 || bh < 20) return;
+        
+        const cv = document.createElement('canvas');
+        cv.width = bw; 
+        cv.height = bh;
+        const cCtx = cv.getContext('2d');
+        cCtx.drawImage(psImage, bx, by, bw, bh, 0, 0, bw, bh);
+        
+        const thumb = document.createElement('div');
+        // Exact dynamic aspect ratio matching each unique variable portrait size
+        thumb.style.cssText = `border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:${bw}/${bh}; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px;`;
+        
+        const dataUrl = cv.toDataURL('image/jpeg', 0.92);
         const tImg = document.createElement('img');
         tImg.src = dataUrl;
         tImg.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#111518; display:block;';
@@ -3308,14 +3277,14 @@ function openPortraitSheetModal() {
         gridContainer.appendChild(thumb);
       });
       
-      msg.textContent = `Successfully adapted and extracted ${allPortraits.length} portraits across composite blocks. Click one to apply.`;
+      msg.textContent = `Successfully detected ${portraits.length} variable-sized portraits via edge segmentation. Click any to apply.`;
     };
     psImage.onerror = () => {
-      msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.[cite: 1]';
+      msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.';
     };
     psImage.src = 'assets/ui_actor_portrets.png';
   } else {
-    msg.textContent = `Ready. Showing adaptive portraits.`;
+    msg.textContent = `Ready. Showing edge-segmented portraits.`;
   }
 }
 
