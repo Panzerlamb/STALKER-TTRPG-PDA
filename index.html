@@ -3569,91 +3569,106 @@ function openPortraitSheetModal() {
       
       psImage = new Image();
       psImage.onload = () => {
-       /* Inside openPortraitSheetModal() -> after cropping canvas elements into allPortraits array */
+        gridContainer.innerHTML = '';
+        const imgW = psImage.width;
+        const imgH = psImage.height;
+        const allPortraits = [];
+        
+        textureNodes.forEach(node => {
+          const id = node.getAttribute('id');
+          const x = parseInt(node.getAttribute('x'), 10);
+          const y = parseInt(node.getAttribute('y'), 10);
+          const w = parseInt(node.getAttribute('width'), 10);
+          const h = parseInt(node.getAttribute('height'), 10);
+          
+          if (isNaN(x) || isNaN(y) || isNaN(w) || isNaN(h)) return;
+          if (x + w > imgW || y + h > imgH) return;
+          
+          const cv = document.createElement('canvas');
+          cv.width = w;
+          cv.height = h;
+          const ctx = cv.getContext('2d');
+          ctx.drawImage(psImage, x, y, w, h, 0, 0, w, h);
+          
+          allPortraits.push({id, w, h, cv});
+        });
+        
+        allPortraits.forEach(b => {
+          const displayName = b.id.replace(/^ui_inGame2_/i, '').replace(/_/g, ' ');
+          const dataUrl = b.cv.toDataURL('image/jpeg', 0.92);
 
-gridContainer.innerHTML = '';
+          const card = document.createElement('div');
+          card.style.cssText = `
+            border: 1px solid var(--border); 
+            background: #0d1113; 
+            cursor: pointer; 
+            display: flex; 
+            flex-direction: column; 
+            border-radius: 4px; 
+            overflow: hidden; 
+            transition: border-color 0.15s ease, transform 0.1s ease;
+          `;
 
-allPortraits.forEach(b => {
-  // Format readable display name (e.g., "ui_inGame2_Strelok" -> "Strelok")
-  const displayName = b.id.replace(/^ui_inGame2_/i, '').replace(/_/g, ' ');
-  const dataUrl = b.cv.toDataURL('image/jpeg', 0.92);
+          const imgBox = document.createElement('div');
+          imgBox.style.cssText = `
+            width: 100%; 
+            height: 90px; 
+            background: #000; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            padding: 4px; 
+            box-sizing: border-box;
+          `;
 
-  // Main Card Wrapper
-  const card = document.createElement('div');
-  card.style.cssText = `
-    border: 1px solid var(--border); 
-    background: #0d1113; 
-    cursor: pointer; 
-    display: flex; 
-    flex-direction: column; 
-    border-radius: 4px; 
-    overflow: hidden; 
-    transition: border-color 0.15s ease, transform 0.1s ease;
-  `;
+          const tImg = document.createElement('img');
+          tImg.src = dataUrl;
+          tImg.style.cssText = 'max-width: 100%; max-height: 100%; object-fit: contain; display: block;';
+          imgBox.appendChild(tImg);
 
-  // Image Box with Explicit Height (Prevents collapsing into 0px horizontal lines)
-  const imgBox = document.createElement('div');
-  imgBox.style.cssText = `
-    width: 100%; 
-    height: 90px; 
-    background: #000; 
-    display: flex; 
-    align-items: center; 
-    justify-content: center; 
-    padding: 4px; 
-    box-sizing: border-box;
-  `;
+          const label = document.createElement('div');
+          label.textContent = displayName;
+          label.title = b.id;
+          label.style.cssText = `
+            font-size: 10px; 
+            color: var(--muted); 
+            padding: 5px 4px; 
+            text-align: center; 
+            white-space: nowrap; 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            background: #080b0c; 
+            border-top: 1px solid var(--border);
+          `;
 
-  const tImg = document.createElement('img');
-  tImg.src = dataUrl;
-  tImg.style.cssText = 'max-width: 100%; max-height: 100%; object-fit: contain; display: block;';
-  imgBox.appendChild(tImg);
+          card.appendChild(imgBox);
+          card.appendChild(label);
 
-  // Text Label
-  const label = document.createElement('div');
-  label.textContent = displayName;
-  label.title = b.id;
-  label.style.cssText = `
-    font-size: 10px; 
-    color: var(--muted); 
-    padding: 5px 4px; 
-    text-align: center; 
-    white-space: nowrap; 
-    overflow: hidden; 
-    text-overflow: ellipsis; 
-    background: #080b0c; 
-    border-top: 1px solid var(--border);
-  `;
+          card.onmouseenter = () => {
+            card.style.borderColor = 'var(--gold)';
+            label.style.color = 'var(--gold)';
+          };
+          card.onmouseleave = () => {
+            card.style.borderColor = 'var(--border)';
+            label.style.color = 'var(--muted)';
+          };
+          card.onclick = () => {
+            const img = $('portrait-img');
+            if (img) {
+              img.src = dataUrl;
+              img.style.display = 'block';
+            }
+            const pText = $('portrait-text');
+            if (pText) pText.style.display = 'none';
+            
+            modal.classList.remove('visible');
+            if (typeof persistDossier === 'function') persistDossier(true);
+          };
 
-  card.appendChild(imgBox);
-  card.appendChild(label);
-
-  // Hover & Selection Behavior
-  card.onmouseenter = () => {
-    card.style.borderColor = 'var(--gold)';
-    label.style.color = 'var(--gold)';
-  };
-  card.onmouseleave = () => {
-    card.style.borderColor = 'var(--border)';
-    label.style.color = 'var(--muted)';
-  };
-  card.onclick = () => {
-    const img = $('portrait-img');
-    if (img) {
-      img.src = dataUrl;
-      img.style.display = 'block';
-    }
-    const pText = $('portrait-text');
-    if (pText) pText.style.display = 'none';
-    
-    modal.classList.remove('visible');
-    if (typeof persistDossier === 'function') persistDossier(true);
-  };
-
-  gridContainer.appendChild(card);
-});
-
-msg.textContent = `Loaded ${allPortraits.length} portraits cleanly. Click any card to apply.`;
+          gridContainer.appendChild(card);
+        });
+        
+        msg.textContent = `Loaded ${allPortraits.length} portraits cleanly. Click any card to apply.`;
       };
       
       psImage.onerror = () => {
