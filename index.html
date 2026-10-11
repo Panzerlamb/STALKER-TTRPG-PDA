@@ -2450,19 +2450,14 @@ Traders buy back at no more than 60% of their own selling price. Factions may of
 
 <!-- PORTRAIT SHEET SELECTION MODAL -->
 <div id="portraitSheetModal" class="modal">
-  <div class="modalBox" style="width:min(720px, 95%); max-height:90vh; display:flex; flex-direction:column;">
+  <div class="modalBox" style="width:min(720px, 95%); max-height:85vh; display:flex; flex-direction:column;">
     <div class="modalTitle">SELECT PORTRAIT FROM SHEET (assets/ui_actor_portrets.png)</div>
-    <div style="font-size:10px; color:var(--muted); margin-bottom:6px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <span>Adjust Cell Size:</span>
-      <label style="font-size:9px;">W: <input type="number" id="psCellW" value="128" style="width:55px; display:inline-block;" min="16" max="512"></label>
-      <label style="font-size:9px;">H: <input type="number" id="psCellH" value="128" style="width:55px; display:inline-block;" min="16" max="512"></label>
-      <button id="psRefreshGrid" style="padding:3px 10px; font-size:9px; background:var(--btn-bg); color:var(--gold); border:1px solid var(--border);">RE-SLICE</button>
-    </div>
-    <div id="psGridContainer" style="height:340px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(100px, 1fr)); gap:8px; align-content:start;">
+    <div style="font-size:10px; color:var(--muted); margin-bottom:8px;">Click any portrait below to select it:</div>
+    <div id="psGridContainer" style="flex:1; height:380px; overflow-y:auto; position:relative; background:#080b0c; border:1px solid var(--border); padding:10px; display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:10px; align-content:start;">
       <!-- Dynamically populated portrait thumbnails -->
     </div>
-    <div id="psMsg" style="min-height:16px; margin-top:4px; font-size:10px; color:var(--gold)"></div>
-    <div class="modalButtons" style="margin-top:6px;">
+    <div id="psMsg" style="min-height:16px; margin-top:6px; font-size:10px; color:var(--gold)"></div>
+    <div class="modalButtons" style="margin-top:8px;">
       <button id="psCancelBtn" style="width:100%;">CANCEL</button>
     </div>
   </div>
@@ -3129,92 +3124,90 @@ const f0=event.target.files&&event.target.files[0];
 if(f0){const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,300/Math.max(im.width,im.height));const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);const img=document.getElementById('portrait-img');img.src=cv.toDataURL('image/jpeg',0.82);img.style.display='block';document.getElementById('portrait-text').style.display='none';if(typeof persistDossier==='function')persistDossier(true)};im.src=rd.result};rd.readAsDataURL(f0);return}
 }
 
-/* ===== PORTRAIT SHEET SELECTOR LOGIC (DYNAMIC GRID SLICER) ===== */
+/* ===== PORTRAIT SHEET SELECTOR LOGIC (AUTOMATIC GRID SLICER) ===== */
 let psImage = null;
-
-function slicePortraitSheet() {
-  const gridContainer = $('psGridContainer');
-  const msg = $('psMsg');
-  if (!psImage) return;
-  
-  gridContainer.innerHTML = '';
-  const cellW = parseInt($('psCellW').value) || 128;
-  const cellH = parseInt($('psCellH').value) || 128;
-  const cols = Math.floor(psImage.width / cellW);
-  const rows = Math.floor(psImage.height / cellH);
-  
-  let count = 0;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const cv = document.createElement('canvas');
-      cv.width = cellW; cv.height = cellH;
-      const ctx = cv.getContext('2d');
-      ctx.drawImage(psImage, c * cellW, r * cellH, cellW, cellH, 0, 0, cellW, cellH);
-      
-      let hasContent = false;
-      try {
-        const imgData = ctx.getImageData(0, 0, cellW, cellH).data;
-        let nonBlackCount = 0;
-        for (let i = 0; i < imgData.length; i += 16) {
-          const red = imgData[i], green = imgData[i+1], blue = imgData[i+2], alpha = imgData[i+3];
-          if (alpha > 15 && (red > 12 || green > 12 || blue > 12)) {
-            nonBlackCount++;
-            if (nonBlackCount > 15) { hasContent = true; break; }
-          }
-        }
-      } catch(err) {
-        hasContent = true;
-      }
-      
-      if (!hasContent) continue;
-
-      const thumb = document.createElement('div');
-      thumb.style.cssText = 'border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; position:relative; aspect-ratio:1; overflow:hidden; display:flex; align-items:center; justify-content:center;';
-      
-      const dataUrl = cv.toDataURL('image/jpeg', 0.85);
-      const tImg = document.createElement('img');
-      tImg.src = dataUrl;
-      tImg.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#111518; display:block; padding:2px;';
-      thumb.appendChild(tImg);
-      
-      thumb.onmouseenter = () => thumb.style.borderColor = 'var(--gold)';
-      thumb.onmouseleave = () => thumb.style.borderColor = 'var(--border)';
-      thumb.onclick = () => {
-        const img = $('portrait-img');
-        img.src = dataUrl;
-        img.style.display = 'block';
-        $('portrait-text').style.display = 'none';$('portraitSheetModal').classList.remove('visible');
-        persistDossier(true);
-      };
-      
-      gridContainer.appendChild(thumb);
-      count++;
-    }
-  }
-  msg.textContent = `Loaded ${count} portraits (${cols}x${rows} grid). Click one to apply.`;
-}
 
 function openPortraitSheetModal() {
   const modal = $('portraitSheetModal');
   modal.classList.add('visible');
+  const gridContainer = $('psGridContainer');
   const msg = $('psMsg');
   
-  if (!psImage) {
-    msg.textContent = 'Loading assets/ui_actor_portrets.png...';
+  if (gridContainer.children.length === 0) {
+    msg.textContent = 'Loading and slicing assets/ui_actor_portrets.png...';
     psImage = new Image();
     psImage.onload = () => {
-      slicePortraitSheet();
+      gridContainer.innerHTML = '';
+      
+      // Standard Stalker actor portrait sheet cell size
+      const cellW = 128, cellH = 128;
+      const cols = Math.floor(psImage.width / cellW);
+      const rows = Math.floor(psImage.height / cellH);
+      
+      let count = 0;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const cv = document.createElement('canvas');
+          cv.width = cellW; 
+          cv.height = cellH;
+          const ctx = cv.getContext('2d');
+          ctx.drawImage(psImage, c * cellW, r * cellH, cellW, cellH, 0, 0, cellW, cellH);
+          
+          // Check if tile has valid portrait content (skipping empty/black slots)
+          let hasContent = false;
+          try {
+            const imgData = ctx.getImageData(0, 0, cellW, cellH).data;
+            let nonBlackCount = 0;
+            for (let i = 0; i < imgData.length; i += 16) {
+              const red = imgData[i], green = imgData[i+1], blue = imgData[i+2], alpha = imgData[i+3];
+              if (alpha > 15 && (red > 15 || green > 15 || blue > 15)) {
+                nonBlackCount++;
+                if (nonBlackCount > 20) { hasContent = true; break; }
+              }
+            }
+          } catch(err) {
+            hasContent = true;
+          }
+          
+          if (!hasContent) continue;
+
+          const thumb = document.createElement('div');
+          // Enforce strict square aspect ratio and flex centering to prevent squishing
+          thumb.style.cssText = 'border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:1; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px;';
+          
+          const dataUrl = cv.toDataURL('image/jpeg', 0.9);
+          const tImg = document.createElement('img');
+          tImg.src = dataUrl;
+          // object-fit: contain preserves original proportions with zero distortion
+          tImg.style.cssText = 'max-width:100%; max-height:100%; object-fit:contain; background:#111518; display:block;';
+          thumb.appendChild(tImg);
+          
+          thumb.onmouseenter = () => thumb.style.borderColor = 'var(--gold)';
+          thumb.onmouseleave = () => thumb.style.borderColor = 'var(--border)';
+          thumb.onclick = () => {
+            const img = $('portrait-img');
+            img.src = dataUrl;
+            img.style.display = 'block';
+            $('portrait-text').style.display = 'none';
+            modal.classList.remove('visible');
+            persistDossier(true);
+          };
+           
+          gridContainer.appendChild(thumb);
+          count++;
+        }
+      }
+      msg.textContent = `Loaded ${count} portraits automatically. Click one to apply.`;
     };
     psImage.onerror = () => {
       msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.';
     };
     psImage.src = 'assets/ui_actor_portrets.png';
   } else {
-    slicePortraitSheet();
+    msg.textContent = 'Select a portrait from the grid below.';
   }
 }
 
-$('psRefreshGrid').onclick = slicePortraitSheet;
 $('psCancelBtn').onclick = () => {$('portraitSheetModal').classList.remove('visible');
 };
 /* ========================================= */
