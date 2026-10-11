@@ -3123,7 +3123,7 @@ const f0=event.target.files&&event.target.files[0];
 if(f0){const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,300/Math.max(im.width,im.height));const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);const img=document.getElementById('portrait-img');img.src=cv.toDataURL('image/jpeg',0.82);img.style.display='block';document.getElementById('portrait-text').style.display='none';if(typeof persistDossier==='function')persistDossier(true)};im.src=rd.result};rd.readAsDataURL(f0);return}
 }
 
-/* ===== PORTRAIT SHEET SELECTOR LOGIC (AUTO-ADAPTIVE VARIANCE & COLOR-JUMP SLICER) ===== */
+/* ===== PORTRAIT SHEET SELECTOR LOGIC (XML MANIFEST PARSER) ===== */
 let psImage = null;
 
 function openPortraitSheetModal() {
@@ -3133,142 +3133,78 @@ function openPortraitSheetModal() {
   const msg = $('psMsg');
   
   if (gridContainer.children.length === 0) {
-    msg.textContent = 'Auto-detecting variable portrait boundaries...';
-    psImage = new Image();
-    psImage.onload = () => {
-      const w = psImage.width;
-      const h = psImage.height;
-      
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(psImage, 0, 0);
-      
-      const imgData = ctx.getImageData(0, 0, w, h);
-      const data = imgData.data;
-      
-      // 1. Calculate horizontal and vertical variance profiles to find cell boundaries
-      // Even without black gaps, touching portraits exhibit a distinct color/variance jump at seams.
-      const colVariance = new Float32Array(w);
-      const rowVariance = new Float32Array(h);
-      
-      for (let x = 0; x < w; x++) {
-        let diffSum = 0;
-        for (let y = 1; y < h; y++) {
-          const idx1 = (y * w + x) * 4;
-          const idx2 = ((y - 1) * w + x) * 4;
-          diffSum += Math.abs(data[idx1] - data[idx2]) + 
-                     Math.abs(data[idx1+1] - data[idx2+1]) + 
-                     Math.abs(data[idx1+2] - data[idx2+2]);
-        }
-        colVariance[x] = diffSum / h;
-      }
-      
-      for (let y = 0; y < h; y++) {
-        let diffSum = 0;
-        for (let x = 1; x < w; x++) {
-          const idx1 = (y * w + x) * 4;
-          const idx2 = (y * w + (x - 1)) * 4;
-          diffSum += Math.abs(data[idx1] - data[idx2]) + 
-                     Math.abs(data[idx1+1] - data[idx2+1]) + 
-                     Math.abs(data[idx1+2] - data[idx2+2]);
-        }
-        rowVariance[y] = diffSum / w;
-      }
-      
-      // 2. Find peaks in variance which signify borders/seams between portraits
-      const findSeams = (varianceArr, maxLen) => {
-        const seams = [0];
-        let lastSeam = 0;
+    msg.textContent = 'Parsing ui_actor_portrets.xml manifest...';
+    
+    // Fetch and parse the exact game configuration XML containing all portrait coordinates[cite: 2]
+    fetch('assets/ui_actor_portrets.xml')
+      .then(response => response.text())
+      .then(xmlText => {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+        const textureNodes = xmlDoc.querySelectorAll('texture');
         
-        for (let i = 20; i < varianceArr.length - 20; i++) {
-          // Look for local variance spikes or regular spacing intervals
-          if (varianceArr[i] > 25 && (i - lastSeam) >= 45) {
-            if ((i - lastSeam) >= maxLen) {
-              // Insert midpoint if a section is too wide without a detected seam
-              seams.push(Math.round((lastSeam + i) / 2));
-            }
-            seams.push(i);
-            lastSeam = i;
-          }
-        }
-        seams.push(varianceArr.length);
-        return seams;
-      };
-      
-      const xSeams = findSeams(colVariance, 200);
-      const ySeams = findSeams(rowVariance, 200);
-      
-      const allPortraits = [];
-      
-      for (let r = 0; r < ySeams.length - 1; r++) {
-        for (let c = 0; c < xSeams.length - 1; c++) {
-          const px = xSeams[c];
-          const py = ySeams[r];
-          const pw = xSeams[c+1] - px;
-          const ph = ySeams[r+1] - py;
+        psImage = new Image();
+        psImage.onload = () => {
+          gridContainer.innerHTML = '';
+          const imgW = psImage.width;
+          const imgH = psImage.height;
+          const allPortraits = [];
           
-          if (pw < 30 || ph < 30) continue;
+          textureNodes.forEach(node => {
+            const id = node.getAttribute('id');
+            const x = parseInt(node.getAttribute('x'), 10);
+            const y = parseInt(node.getAttribute('y'), 10);
+            const w = parseInt(node.getAttribute('width'), 10);
+            const h = parseInt(node.getAttribute('height'), 10);
+            
+            if (isNaN(x) || isNaN(y) || isNaN(w) || isNaN(h)) return;
+            if (x + w > imgW || y + h > imgH) return;
+            
+            const cv = document.createElement('canvas');
+            cv.width = w;
+            cv.height = h;
+            const ctx = cv.getContext('2d');
+            ctx.drawImage(psImage, x, y, w, h, 0, 0, w, h);
+            
+            allPortraits.push({id, w, h, cv});
+          });
           
-          const cv = document.createElement('canvas');
-          cv.width = pw; 
-          cv.height = ph;
-          const cCtx = cv.getContext('2d');
-          cCtx.drawImage(psImage, px, py, pw, ph, 0, 0, pw, ph);
+          allPortraits.forEach(b => {
+            const thumb = document.createElement('div');
+            thumb.style.cssText = `border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:${b.w}/${b.h}; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px; position:relative;`;
+            
+            const dataUrl = b.cv.toDataURL('image/jpeg', 0.92);
+            const tImg = document.createElement('img');
+            tImg.src = dataUrl;
+            tImg.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#111518; display:block;';
+            thumb.appendChild(tImg);
+            
+            thumb.title = b.id; // Show texture ID on hover
+            
+            thumb.onmouseenter = () => thumb.style.borderColor = 'var(--gold)';
+            thumb.onmouseleave = () => thumb.style.borderColor = 'var(--border)';
+            thumb.onclick = () => {
+              const img = $('portrait-img');
+              img.src = dataUrl;
+              img.style.display = 'block';
+              $('portrait-text').style.display = 'none';
+              modal.classList.remove('visible');
+              persistDossier(true);
+            };
+            
+            gridContainer.appendChild(thumb);
+          });
           
-          // Validate content to ensure it's a real portrait and not empty space
-          let hasContent = false;
-          try {
-            const subData = cCtx.getImageData(0, 0, pw, ph).data;
-            let nonBlack = 0;
-            for (let i = 0; i < subData.length; i += 20) {
-              if (subData[i] > 15 || subData[i+1] > 15 || subData[i+2] > 15) {
-                nonBlack++;
-                if (nonBlack > 35) { hasContent = true; break; }
-              }
-            }
-          } catch(err) {
-            hasContent = true;
-          }
-          
-          if (hasContent) {
-            allPortraits.push({w: pw, h: ph, cv});
-          }
-        }
-      }
-      
-      gridContainer.innerHTML = '';
-      allPortraits.forEach(b => {
-        const thumb = document.createElement('div');
-        thumb.style.cssText = `border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; aspect-ratio:${b.w}/${b.h}; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:4px;`;
-        
-        const dataUrl = b.cv.toDataURL('image/jpeg', 0.92);
-        const tImg = document.createElement('img');
-        tImg.src = dataUrl;
-        tImg.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#111518; display:block;';
-        thumb.appendChild(tImg);
-        
-        thumb.onmouseenter = () => thumb.style.borderColor = 'var(--gold)';
-        thumb.onmouseleave = () => thumb.style.borderColor = 'var(--border)';
-        thumb.onclick = () => {
-          const img = $('portrait-img');
-          img.src = dataUrl;
-          img.style.display = 'block';
-          $('portrait-text').style.display = 'none';
-          modal.classList.remove('visible');
-          persistDossier(true);
+          msg.textContent = `Successfully loaded ${allPortraits.length} portraits using exact XML mapping[cite: 2]. Click any to apply.`;
         };
-        
-        gridContainer.appendChild(thumb);
+        psImage.onerror = () => {
+          msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.';
+        };
+        psImage.src = 'assets/ui_actor_portrets.png';
+      })
+      .catch(err => {
+        msg.textContent = 'Failed to load assets/ui_actor_portrets.xml. Check file path.';
       });
-      
-      msg.textContent = `Auto-extracted ${allPortraits.length} portraits dynamically. Click any to apply.`;
-    };
-    psImage.onerror = () => {
-      msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.';
-    };
-    psImage.src = 'assets/ui_actor_portrets.png';
   } else {
     msg.textContent = 'Ready. Click any portrait to apply.';
   }
