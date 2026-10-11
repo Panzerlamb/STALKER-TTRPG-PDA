@@ -3138,7 +3138,6 @@ function openPortraitSheetModal() {
     psImage = new Image();
     psImage.onload = () => {
       gridContainer.innerHTML = '';
-      // Adjust cell width and height if your sprite sheet uses different dimensions
       const cellW = 128, cellH = 128;
       const cols = Math.floor(psImage.width / cellW);
       const rows = Math.floor(psImage.height / cellH);
@@ -3147,31 +3146,30 @@ function openPortraitSheetModal() {
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const cv = document.createElement('canvas');
-          cv.width = 128; cv.height = 128;
+          cv.width = cellW; cv.height = cellH;
           const ctx = cv.getContext('2d');
-          ctx.drawImage(psImage, c * cellW, r * cellH, cellW, cellH, 0, 0, 128, 128);
+          ctx.drawImage(psImage, c * cellW, r * cellH, cellW, cellH, 0, 0, cellW, cellH);
           
-          // Wrapped in try/catch to prevent canvas tainting crashes on local file:// execution
           let hasContent = true;
           try {
-            const imgData = ctx.getImageData(0, 0, 128, 128).data;
+            const imgData = ctx.getImageData(0, 0, cellW, cellH).data;
             hasContent = false;
             for (let i = 3; i < imgData.length; i += 16) {
               if (imgData[i] > 20) { hasContent = true; break; }
             }
           } catch(err) {
-            hasContent = true; // Fallback if canvas is tainted by local file security
+            hasContent = true;
           }
           
           if (!hasContent && (cols * rows > 10)) continue;
 
           const thumb = document.createElement('div');
-          thumb.style.cssText = 'border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; position:relative; aspect-ratio:1; overflow:hidden;';
+          thumb.style.cssText = 'border:1px solid var(--border); background:#050708; cursor:pointer; text-align:center; transition:0.15s; position:relative; aspect-ratio:1; overflow:hidden; display:flex; align-items:center; justify-content:center;';
           
           const dataUrl = cv.toDataURL('image/jpeg', 0.85);
           const tImg = document.createElement('img');
           tImg.src = dataUrl;
-          tImg.style.cssText = 'width:100%; height:100%; object-fit:cover; display:block;';
+          tImg.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#111518; display:block; padding:4px;';
           thumb.appendChild(tImg);
           
           thumb.onmouseenter = () => thumb.style.borderColor = 'var(--gold)';
