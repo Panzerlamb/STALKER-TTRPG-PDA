@@ -3123,7 +3123,7 @@ const f0=event.target.files&&event.target.files[0];
 if(f0){const rd=new FileReader();rd.onload=()=>{const im=new Image();im.onload=()=>{const k=Math.min(1,300/Math.max(im.width,im.height));const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(im.width*k));cv.height=Math.max(1,Math.round(im.height*k));cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);const img=document.getElementById('portrait-img');img.src=cv.toDataURL('image/jpeg',0.82);img.style.display='block';document.getElementById('portrait-text').style.display='none';if(typeof persistDossier==='function')persistDossier(true)};im.src=rd.result};rd.readAsDataURL(f0);return}
 }
 
-/* ===== PORTRAIT SHEET SELECTOR LOGIC (AUTO-SCALING XML MANIFEST PARSER) ===== */
+/* ===== PORTRAIT SHEET SELECTOR LOGIC (1:1 UNSCALED XML MANIFEST PARSER) ===== */
 let psImage = null;
 
 function openPortraitSheetModal() {
@@ -3133,61 +3133,40 @@ function openPortraitSheetModal() {
   const msg = $('psMsg');
   
   if (gridContainer.children.length === 0) {
-    msg.textContent = 'Parsing and scaling ui_actor_portrets.xml...';
+    msg.textContent = 'Parsing ui_actor_portrets.xml (1:1 native coordinates)...';
     
     fetch('assets/ui_actor_portrets.xml')
       .then(response => response.text())
       .then(xmlText => {
         const parser = new DOMParser();
         const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
-        const textureNodes = xmlDoc.querySelectorAll('texture');
+        const textureNodes = xmlDoc.querySelectorAll('texture');[cite: 2]
         
         psImage = new Image();
         psImage.onload = () => {
           gridContainer.innerHTML = '';
           const imgW = psImage.width;
           const imgH = psImage.height;
-          
-          // Step 1: Collect valid textures and find max XML bounds to determine reference size
-          const rawTextures = [];
-          let maxXmlX = 0;
-          let maxXmlY = 0;
-          
-          textureNodes.forEach(node => {
-            const id = node.getAttribute('id');
-            const x = parseInt(node.getAttribute('x'), 10);
-            const y = parseInt(node.getAttribute('y'), 10);
-            const w = parseInt(node.getAttribute('width'), 10);
-            const h = parseInt(node.getAttribute('height'), 10);
-            
-            if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
-              if (x + w > maxXmlX) maxXmlX = x + w;
-              if (y + h > maxXmlY) maxXmlY = y + h;
-              rawTextures.push({id, x, y, w, h});
-            }
-          });
-          
-          // Step 2: Compute precise scale factors between XML reference sheet and actual loaded image
-          const scaleX = imgW / (maxXmlX || 4096);
-          const scaleY = imgH / (maxXmlY || 2048);
-          
           const allPortraits = [];
           
-          rawTextures.forEach(t => {
-            const x = Math.round(t.x * scaleX);
-            const y = Math.round(t.y * scaleY);
-            const w = Math.round(t.w * scaleX);
-            const h = Math.round(t.h * scaleY);
+          textureNodes.forEach(node => {[cite: 2]
+            const id = node.getAttribute('id');[cite: 2]
+            const x = parseInt(node.getAttribute('x'), 10);[cite: 2]
+            const y = parseInt(node.getAttribute('y'), 10);[cite: 2]
+            const w = parseInt(node.getAttribute('width'), 10);[cite: 2]
+            const h = parseInt(node.getAttribute('height'), 10);[cite: 2]
             
-            if (x + w > imgW || y + h > imgH || w <= 0 || h <= 0) return;
+            if (isNaN(x) || isNaN(y) || isNaN(w) || isNaN(h)) return;
+            if (x + w > imgW || y + h > imgH) return;
             
             const cv = document.createElement('canvas');
             cv.width = w;
             cv.height = h;
             const ctx = cv.getContext('2d');
+            // Draw using exact native XML coordinates with zero scaling
             ctx.drawImage(psImage, x, y, w, h, 0, 0, w, h);
             
-            allPortraits.push({id: t.id, w, h, cv});
+            allPortraits.push({id, w, h, cv});
           });
           
           allPortraits.forEach(b => {
@@ -3216,7 +3195,7 @@ function openPortraitSheetModal() {
             gridContainer.appendChild(thumb);
           });
           
-          msg.textContent = `Successfully scaled and loaded ${allPortraits.length} portraits[cite: 2]. Click any to apply.`;
+          msg.textContent = `Successfully loaded ${allPortraits.length} portraits using exact 1:1 XML mapping. Click any to apply.`;
         };
         psImage.onerror = () => {
           msg.textContent = 'Failed to load assets/ui_actor_portrets.png. Check file path.';
