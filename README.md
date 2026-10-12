@@ -7,6 +7,8 @@ An **UNOFFICIAL** Year Zero Engine adaptation set in the world of the S.T.A.L.K.
    -A dossier to serve as your character sheet including the option to upload your own profile picture or pick from portraits that you may find familiar.
 
    -The entire 'S.T.A.L.K.E.R' adaptation rulebook. 
+
+
 Stored locally, but can be exported as a save-file or code to be shared or saved for a later date.
 
  ------------------------ https://panzerlamb.github.io/STALKER-TTRPG-PDA/ ------------------------
